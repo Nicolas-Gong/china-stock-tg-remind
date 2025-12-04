@@ -268,13 +268,14 @@ class AlertManager:
             print(f"保存提醒数据失败: {e}")
 
     def add_alert(self, user_id: int, stock_code: str, alert_type: str,
-                  threshold: float, interval_minutes: int = 5) -> bool:
+                  threshold: float, interval_minutes: int = 5, threshold_direction: str = 'both') -> bool:
         """添加提醒"""
         alert = {
             "user_id": user_id,
             "stock_code": stock_code,
             "alert_type": alert_type,
             "threshold": threshold,
+            "threshold_direction": threshold_direction,  # 'both', 'up', 'down'
             "interval_minutes": interval_minutes,
             "last_alert_time": None,
             "created_at": datetime.now().isoformat()
@@ -286,6 +287,7 @@ class AlertManager:
                 existing["stock_code"] == stock_code and
                 existing["alert_type"] == alert_type and
                 existing["threshold"] == threshold and
+                existing.get("threshold_direction", "both") == threshold_direction and
                 existing["interval_minutes"] == interval_minutes):
                 return False  # 已存在
 
@@ -343,24 +345,58 @@ class AlertManager:
             if alert["alert_type"] == "price_change":
                 # 价格变化提醒
                 change_percent = stock_data.get("change_percent", 0)
-                if abs(change_percent) >= alert["threshold"]:
+                threshold_direction = alert.get("threshold_direction", "both")
+
+                # 根据方向判断是否触发提醒
+                should_trigger = False
+                if threshold_direction == "both":
+                    should_trigger = abs(change_percent) >= alert["threshold"]
+                elif threshold_direction == "up":
+                    should_trigger = change_percent >= alert["threshold"]
+                elif threshold_direction == "down":
+                    should_trigger = change_percent <= -alert["threshold"]
+
+                if should_trigger:
                     alert_triggered = True
                     direction = "上涨" if change_percent > 0 else "下跌"
+                    direction_desc = {
+                        'both': f"{direction}幅度",
+                        'up': "涨幅",
+                        'down': "跌幅"
+                    }[threshold_direction]
+
                     message = (f"🔔 股票提醒\n"
                               f"股票: {stock_data['name']} ({stock_data['code']})\n"
                               f"当前价格: {stock_data['current_price']}\n"
-                              f"{direction}幅度: {abs(change_percent)}%\n"
+                              f"{direction_desc}: {abs(change_percent)}%\n"
                               f"阈值: {alert['threshold']}%")
 
             elif alert["alert_type"] == "daily_change":
                 # 今日涨跌幅提醒
                 change_percent = stock_data.get("change_percent", 0)
-                if abs(change_percent) >= alert["threshold"]:
+                threshold_direction = alert.get("threshold_direction", "both")
+
+                # 根据方向判断是否触发提醒
+                should_trigger = False
+                if threshold_direction == "both":
+                    should_trigger = abs(change_percent) >= alert["threshold"]
+                elif threshold_direction == "up":
+                    should_trigger = change_percent >= alert["threshold"]
+                elif threshold_direction == "down":
+                    should_trigger = change_percent <= -alert["threshold"]
+
+                if should_trigger:
                     alert_triggered = True
                     direction = "上涨" if change_percent > 0 else "下跌"
+                    direction_desc = {
+                        'both': f"今日{direction}幅",
+                        'up': "今日涨幅",
+                        'down': "今日跌幅"
+                    }[threshold_direction]
+
                     message = (f"🔔 今日涨跌幅提醒\n"
                               f"股票: {stock_data['name']} ({stock_data['code']})\n"
-                              f"今日{direction}幅: {abs(change_percent)}%\n"
+                              f"{direction_desc}: {abs(change_percent)}%\n"
                               f"阈值: {alert['threshold']}%")
 
             # 检查是否可以发送提醒
@@ -437,18 +473,45 @@ class StockBot:
         if len(args) < 3:
             await update.message.reply_text(
                 "❌ 无效的命令格式。\n"
-                "示例：/add 600000 价格变化 2 5\n"
-                "参数：股票代码 提醒类型 阈值(%) [时间间隔(分钟)]"
+                "示例：/add 600000 价格变化 ±2 5\n"
+                "参数：股票代码 提醒类型 阈值(%) [时间间隔(分钟)]\n\n"
+                "阈值格式：\n"
+                "  ±2 或 2   - 涨跌幅超过2%时提醒（双向）\n"
+                "  +2        - 涨幅超过2%时提醒（单向上）\n"
+                "  -2        - 跌幅超过2%时提醒（单向下）"
             )
             return
 
         stock_code = args[0].upper()
         alert_type = args[1]
+
+        # 解析阈值，支持 ±2, +2, -2, 2 格式
+        threshold_str = args[2]
         try:
-            threshold = float(args[2])
+            if threshold_str.startswith('±'):
+                threshold_value = float(threshold_str[1:])
+                threshold_direction = 'both'  # 双向
+            elif threshold_str.startswith('+'):
+                threshold_value = float(threshold_str[1:])
+                threshold_direction = 'up'  # 向上
+            elif threshold_str.startswith('-'):
+                threshold_value = float(threshold_str[1:])
+                threshold_direction = 'down'  # 向下
+            else:
+                threshold_value = float(threshold_str)
+                threshold_direction = 'both'  # 双向
+        except ValueError:
+            await update.message.reply_text(
+                "❌ 无效的阈值格式。\n"
+                "支持格式：±2, +2, -2 或 2\n"
+                "例如：±2（双向）、+2（上涨）、-2（下跌）"
+            )
+            return
+
+        try:
             interval_minutes = int(args[3]) if len(args) > 3 else 5
         except ValueError:
-            await update.message.reply_text("❌ 无效的阈值或时间间隔。请输入数字。")
+            await update.message.reply_text("❌ 无效的时间间隔。请输入数字。")
             return
 
         if alert_type not in ["价格变化", "今日涨跌"]:
@@ -457,15 +520,21 @@ class StockBot:
 
         # 添加提醒
         success = self.alert_manager.add_alert(
-            user.id, stock_code, alert_type, threshold, interval_minutes
+            user.id, stock_code, alert_type, threshold_value, interval_minutes, threshold_direction
         )
 
         if success:
+            direction_text = {
+                'both': '涨跌',
+                'up': '上涨',
+                'down': '下跌'
+            }[threshold_direction]
+
             await update.message.reply_text(
                 f"✅ 成功添加提醒！\n"
                 f"股票：{stock_code}\n"
                 f"类型：{alert_type}\n"
-                f"阈值：{threshold}%\n"
+                f"阈值：{threshold_str}（{direction_text}）\n"
                 f"时间间隔：{interval_minutes}分钟"
             )
         else:
