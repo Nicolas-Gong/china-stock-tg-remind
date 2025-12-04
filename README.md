@@ -128,6 +128,7 @@ python stock_bot.py
 
 - `stock_data.json`：存储用户的提醒设置
 - `stock_cache.json`：缓存股票价格数据（6秒有效期）
+- `stock_names.json`：缓存股票名称映射（长期保存）
 
 ## 📊 股票数据API
 

@@ -34,6 +34,7 @@ CONFIG = {
     "telegram_token": "YOUR_TELEGRAM_BOT_TOKEN",
     "data_file": "stock_data.json",
     "cache_file": "stock_cache.json",
+    "name_cache_file": "stock_names.json",  # 股票名称缓存文件
     "check_interval": 60,  # 检查间隔（秒）
     "timeout": 10,  # 请求超时时间
     "cache_expiry_seconds": 6,  # 缓存过期时间（秒）
@@ -90,6 +91,40 @@ def is_trading_time(stock_code: str) -> bool:
         # 未知市场，默认认为在交易时间内
         return True
 
+# 股票名称缓存
+class StockNameCache:
+    def __init__(self, name_cache_file: str):
+        self.name_cache_file = name_cache_file
+        self.name_cache = self._load_cache()
+
+    def _load_cache(self) -> Dict:
+        """加载名称缓存文件"""
+        if os.path.exists(self.name_cache_file):
+            try:
+                with open(self.name_cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {}
+        return {}
+
+    def _save_cache(self):
+        """保存名称缓存到文件"""
+        try:
+            with open(self.name_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.name_cache, f, indent=2, ensure_ascii=False)
+        except IOError as e:
+            print(f"保存名称缓存失败: {e}")
+
+    def get_stock_name(self, stock_code: str) -> Optional[str]:
+        """获取股票名称"""
+        return self.name_cache.get(stock_code)
+
+    def set_stock_name(self, stock_code: str, name: str):
+        """设置股票名称到缓存"""
+        if stock_code and name:
+            self.name_cache[stock_code] = name
+            self._save_cache()
+
 # 股票数据缓存
 class StockCache:
     def __init__(self, cache_file: str):
@@ -134,8 +169,9 @@ class StockCache:
 
 # 股票数据获取
 class StockDataFetcher:
-    def __init__(self, cache: StockCache):
+    def __init__(self, cache: StockCache, name_cache: StockNameCache = None):
         self.cache = cache
+        self.name_cache = name_cache
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -234,6 +270,10 @@ class StockDataFetcher:
                     else:
                         stock_data["change"] = 0
                         stock_data["change_percent"] = 0
+
+                    # 缓存股票名称
+                    if self.name_cache and stock_data["name"]:
+                        self.name_cache.set_stock_name(target_code, stock_data["name"])
 
                     return stock_data
 
@@ -416,7 +456,8 @@ class StockBot:
         self.token = token
         self.bot = telegram.Bot(token=token)
         self.cache = StockCache(CONFIG["cache_file"])
-        self.fetcher = StockDataFetcher(self.cache)
+        self.name_cache = StockNameCache(CONFIG["name_cache_file"])
+        self.fetcher = StockDataFetcher(self.cache, self.name_cache)
         self.alert_manager = AlertManager(CONFIG["data_file"])
 
         # 创建应用
@@ -530,9 +571,19 @@ class StockBot:
                 'down': '下跌'
             }[threshold_direction]
 
+            # 尝试获取股票名称
+            stock_name = self.name_cache.get_stock_name(stock_code)
+            if not stock_name:
+                # 如果缓存中没有，尝试获取一次
+                stock_data = self.fetcher.fetch_stock_data(stock_code)
+                if stock_data:
+                    stock_name = stock_data.get('name', '')
+
+            stock_display = f"{stock_name} ({stock_code})" if stock_name else stock_code
+
             await update.message.reply_text(
                 f"✅ 成功添加提醒！\n"
-                f"股票：{stock_code}\n"
+                f"股票：{stock_display}\n"
                 f"类型：{alert_type}\n"
                 f"阈值：{threshold_str}（{direction_text}）\n"
                 f"时间间隔：{interval_minutes}分钟"
@@ -551,10 +602,29 @@ class StockBot:
 
         message = "📋 你的股票提醒列表：\n\n"
         for i, alert in enumerate(alerts):
+            # 获取股票名称
+            stock_name = self.name_cache.get_stock_name(alert['stock_code'])
+            if not stock_name:
+                # 如果缓存中没有，尝试获取一次
+                stock_data = self.fetcher.fetch_stock_data(alert['stock_code'])
+                if stock_data:
+                    stock_name = stock_data.get('name', '')
+
+            stock_display = f"{stock_name} ({alert['stock_code']})" if stock_name else alert['stock_code']
+
+            # 获取阈值方向显示
+            threshold_direction = alert.get('threshold_direction', 'both')
+            direction_symbols = {
+                'both': '±',
+                'up': '+',
+                'down': '-'
+            }
+            threshold_display = f"{direction_symbols[threshold_direction]}{alert['threshold']}"
+
             message += (
-                f"{i+1}. 股票: {alert['stock_code']}\n"
+                f"{i+1}. 股票: {stock_display}\n"
                 f"   类型: {alert['alert_type']}\n"
-                f"   阈值: {alert['threshold']}%\n"
+                f"   阈值: {threshold_display}%\n"
                 f"   时间间隔: {alert['interval_minutes']}分钟\n"
                 f"   创建时间: {alert['created_at']}\n\n"
             )
