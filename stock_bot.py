@@ -595,6 +595,16 @@ class StockBot:
             await update.message.reply_text("❌ 无效的提醒类型。请选择：价格变化 或 今日涨跌")
             return
 
+        # 验证股票代码是否存在
+        await update.message.reply_text("🔍 验证股票代码中...")
+        stock_data = self.fetcher.fetch_stock_data(stock_code)
+        if not stock_data:
+            await update.message.reply_text(
+                f"❌ 股票代码 '{stock_code}' 无效或不存在。\n"
+                "请检查股票代码是否正确。"
+            )
+            return
+
         # 添加提醒
         success = self.alert_manager.add_alert(
             user.id, stock_code, alert_type, threshold_value, interval_minutes, threshold_direction
