@@ -79,10 +79,13 @@ def is_trading_time(stock_code: str) -> bool:
         # 北京时间：21:30(今) - 04:00(明) 或 22:30(今) - 05:00(明)
         # 这里简化为北京时间 21:30 到次日 04:00
         us_start_evening = datetime.strptime("21:30", "%H:%M").time()
+        us_end_night = datetime.strptime("23:59:59", "%H:%M:%S").time()
+        us_start_next_morning = datetime.strptime("00:00:00", "%H:%M:%S").time()
         us_end_next_morning = datetime.strptime("04:00", "%H:%M").time()
 
-        # 如果是晚上21:30之后到23:59，或是凌晨00:00到04:00
-        if current_time >= us_start_evening or current_time <= us_end_next_morning:
+        # 如果是晚上21:30到23:59，或是凌晨00:00到04:00
+        if (current_time >= us_start_evening and current_time <= us_end_night) or \
+           (current_time >= us_start_next_morning and current_time <= us_end_next_morning):
             return True
 
         return False
@@ -369,14 +372,24 @@ class AlertManager:
 
     def check_alerts(self, fetcher: StockDataFetcher, bot: telegram.Bot):
         """检查所有提醒并发送通知"""
+        current_time = datetime.now()
+        print(f"[{current_time}] 开始检查提醒，共 {len(self.alerts['alerts'])} 个提醒")
+
         for alert in self.alerts["alerts"]:
+            stock_code = alert["stock_code"]
+
             # 检查是否在交易时间内
-            if not is_trading_time(alert["stock_code"]):
+            is_trading = is_trading_time(stock_code)
+            print(f"[{current_time}] 检查 {stock_code} 是否在交易时间内: {is_trading}")
+            if not is_trading:
                 continue
 
-            stock_data = fetcher.fetch_stock_data(alert["stock_code"])
+            stock_data = fetcher.fetch_stock_data(stock_code)
             if not stock_data:
+                print(f"[{current_time}] 获取 {stock_code} 数据失败")
                 continue
+
+            print(f"[{current_time}] {stock_code} 价格: {stock_data.get('current_price', 0)}, 涨跌幅: {stock_data.get('change_percent', 0)}%")
 
             # 检查提醒条件
             alert_triggered = False
