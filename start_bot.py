@@ -42,7 +42,7 @@ def validate_config(config):
     return True
 
 
-async def main():
+def main():
     """主函数"""
     logger.info("🚀 开始启动股票提醒机器人...")
 
@@ -58,9 +58,10 @@ async def main():
         bot = StockBot(config["telegram_token"])
         logger.info("✅ 机器人初始化成功")
 
-        # 设置Bot Commands
+        # 设置Bot Commands - 使用同步方式包装异步调用
         logger.info("⚙️ 设置机器人命令...")
-        await bot.setup_bot_commands()
+        import asyncio
+        asyncio.run(bot.setup_bot_commands())
         logger.info("✅ 机器人命令设置成功")
 
         # 启动提醒检查
@@ -75,7 +76,7 @@ async def main():
         logger.info("🛑 按 Ctrl+C 停止机器人")
 
         try:
-            bot.start_polling()
+            bot.app.run_polling()
         except KeyboardInterrupt:
             logger.info("🛑 收到停止信号，正在关闭机器人...")
         except Exception as e:
@@ -92,5 +93,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()
