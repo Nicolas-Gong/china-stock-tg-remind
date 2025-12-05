@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 
 import requests
 import telegram
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -619,18 +619,34 @@ class StockBot:
         # 注册消息处理器
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
 
+    def create_main_menu(self) -> InlineKeyboardMarkup:
+        """创建主菜单键盘"""
+        keyboard = [
+            [
+                InlineKeyboardButton("➕ 添加提醒", callback_data="menu_add"),
+                InlineKeyboardButton("📋 查看提醒", callback_data="menu_list"),
+            ],
+            [
+                InlineKeyboardButton("🗑️ 删除提醒", callback_data="menu_remove"),
+                InlineKeyboardButton("❓ 帮助", callback_data="menu_help"),
+            ],
+            [
+                InlineKeyboardButton("ℹ️ 关于", callback_data="menu_about"),
+            ]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /start 命令"""
         user = update.effective_user
-        await update.message.reply_text(
+        welcome_text = (
             f"👋 你好，{user.first_name}！\n"
             "我是股票价格提醒机器人。\n\n"
-            "你可以使用以下命令：\n"
-            "/add - 添加股票提醒\n"
-            "/list - 查看我的提醒列表\n"
-            "/remove - 移除提醒\n"
-            "/help - 查看帮助信息"
+            "📱 请选择以下功能："
         )
+
+        reply_markup = self.create_main_menu()
+        await update.message.reply_text(welcome_text, reply_markup=reply_markup)
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /help 命令"""
@@ -736,12 +752,14 @@ class StockBot:
 
             stock_display = f"{stock_name} ({stock_code})" if stock_name else stock_code
 
+            reply_markup = self.create_main_menu()
             await update.message.reply_text(
                 f"✅ 成功添加提醒！\n"
                 f"股票：{stock_display}\n"
                 f"类型：{alert_type}\n"
                 f"阈值：{threshold_str}（{direction_text}）\n"
-                f"时间间隔：{interval_minutes}分钟"
+                f"时间间隔：{interval_minutes}分钟",
+                reply_markup=reply_markup
             )
         else:
             await update.message.reply_text("❌ 添加提醒失败，可能已存在相同提醒。")
@@ -791,8 +809,9 @@ class StockBot:
                 f"   创建时间: {created_time_str}\n\n"
             )
 
-        message += "使用 /remove 命令移除提醒。"
-        await update.message.reply_text(message)
+        message += "💡 使用「🗑️ 删除提醒」功能可以移除不需要的提醒。"
+        reply_markup = self.create_main_menu()
+        await update.message.reply_text(message, reply_markup=reply_markup)
 
     async def remove_alert(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /remove 命令"""
@@ -818,7 +837,8 @@ class StockBot:
         # 移除提醒
         success = self.alert_manager.remove_alert(user.id, alert_id)
         if success:
-            await update.message.reply_text(f"✅ 成功移除提醒 {alert_id + 1}。")
+            reply_markup = self.create_main_menu()
+            await update.message.reply_text(f"✅ 成功移除提醒 {alert_id + 1}。", reply_markup=reply_markup)
         else:
             await update.message.reply_text("❌ 移除提醒失败。")
 
@@ -826,7 +846,153 @@ class StockBot:
         """处理回调查询（按钮点击等）"""
         query = update.callback_query
         await query.answer()
-        await query.edit_message_text(text=f"你点击了：{query.data}")
+
+        callback_data = query.data
+
+        if callback_data == "menu_add":
+            # 显示添加提醒说明
+            text = (
+                "➕ 添加股票提醒\n\n"
+                "请使用以下命令格式添加提醒：\n\n"
+                "📝 基础格式：\n"
+                "`/add 股票代码 提醒类型 阈值 时间间隔`\n\n"
+                "📊 示例：\n"
+                "`/add 600000 价格变化 2 5`\n"
+                "`/add 000001 今日涨跌 5`\n\n"
+                "🎯 参数说明：\n"
+                "• 股票代码：如 600000、000001\n"
+                "• 提醒类型：价格变化 / 今日涨跌\n"
+                "• 阈值：百分比（如 2 表示 2%）\n"
+                "• 时间间隔：分钟（可选，默认5分钟）\n\n"
+                "💡 阈值格式：\n"
+                "±2 或 2 = 双向提醒\n"
+                "+2 = 只涨提醒\n"
+                "-2 = 只跌提醒"
+            )
+            reply_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="menu_main")]
+            ])
+
+        elif callback_data == "menu_list":
+            # 显示提醒列表
+            user = update.effective_user
+            alerts = self.alert_manager.get_user_alerts(user.id)
+
+            if not alerts:
+                text = "📋 你还没有添加任何提醒。\n\n请先使用「➕ 添加提醒」功能添加新的股票提醒。"
+            else:
+                text = "📋 你的股票提醒列表：\n\n"
+                for i, alert in enumerate(alerts):
+                    # 获取股票名称
+                    stock_name = self.name_cache.get_stock_name(alert['stock_code'])
+                    if not stock_name:
+                        # 如果缓存中没有，尝试获取一次
+                        stock_data = self.fetcher.fetch_stock_data(alert['stock_code'])
+                        if stock_data:
+                            stock_name = stock_data.get('name', '')
+
+                    stock_display = f"{stock_name} ({alert['stock_code']})" if stock_name else alert['stock_code']
+
+                    # 获取阈值方向显示
+                    threshold_direction = alert.get('threshold_direction', 'both')
+                    direction_symbols = {
+                        'both': '±',
+                        'up': '+',
+                        'down': '-'
+                    }
+                    threshold_display = f"{direction_symbols[threshold_direction]}{alert['threshold']}"
+
+                    text += (
+                        f"{i + 1}. 📈 {stock_display}\n"
+                        f"   类型: {alert['alert_type']}\n"
+                        f"   阈值: {threshold_display}%\n"
+                        f"   间隔: {alert['interval_minutes']}分钟\n\n"
+                    )
+
+                text += "💡 使用「🗑️ 删除提醒」功能可以移除不需要的提醒。"
+
+            reply_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="menu_main")]
+            ])
+
+        elif callback_data == "menu_remove":
+            # 显示删除提醒说明
+            text = (
+                "🗑️ 删除股票提醒\n\n"
+                "请使用以下命令删除提醒：\n\n"
+                "📝 命令格式：\n"
+                "`/remove 提醒编号`\n\n"
+                "📊 示例：\n"
+                "`/remove 1` - 删除第一个提醒\n"
+                "`/remove 2` - 删除第二个提醒\n\n"
+                "💡 查看提醒列表：\n"
+                "先使用「📋 查看提醒」功能查看提醒编号，然后再删除。"
+            )
+            reply_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="menu_main")]
+            ])
+
+        elif callback_data == "menu_help":
+            # 显示帮助信息
+            text = (
+                "❓ 股票提醒机器人帮助\n\n"
+                "📖 功能介绍：\n"
+                "• 实时监控股票价格变化\n"
+                "• 支持多种提醒条件设置\n"
+                "• 智能交易时间判断\n"
+                "• 多市场股票支持\n\n"
+                "🎯 提醒类型：\n"
+                "• 价格变化：监控短期价格波动\n"
+                "• 今日涨跌：监控当日整体涨跌幅\n\n"
+                "📊 支持市场：\n"
+                "• 🇨🇳 A股市场（上海、深圳）\n"
+                "• 🇭🇰 港股市场\n"
+                "• 🇺🇸 美股市场\n\n"
+                "⏰ 交易时间：\n"
+                "• A股：周一至周五 9:30-11:30, 13:00-15:00\n"
+                "• 港股：周一至周五 9:30-12:00, 13:00-16:00\n"
+                "• 美股：周一至周五 21:30-04:00（北京时间）"
+            )
+            reply_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="menu_main")]
+            ])
+
+        elif callback_data == "menu_about":
+            # 显示关于信息
+            text = (
+                "ℹ️ 关于股票提醒机器人\n\n"
+                "🤖 版本：v2.0\n"
+                "📅 更新时间：2024年12月\n\n"
+                "💡 特性：\n"
+                "• 🚀 高性能异步处理\n"
+                "• 💾 智能数据缓存\n"
+                "• 🔄 实时价格监控\n"
+                "• 📱 用户友好界面\n"
+                "• 🛡️ 稳定可靠运行\n\n"
+                "📊 数据来源：腾讯财经API\n"
+                "⚡ 检查频率：每60秒\n"
+                "💾 缓存有效期：30秒\n\n"
+                "🌟 感谢使用！"
+            )
+            reply_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="menu_main")]
+            ])
+
+        elif callback_data == "menu_main":
+            # 返回主菜单
+            user = update.effective_user
+            text = (
+                f"👋 你好，{user.first_name}！\n"
+                "我是股票价格提醒机器人。\n\n"
+                "📱 请选择以下功能："
+            )
+            reply_markup = self.create_main_menu()
+
+        else:
+            text = f"❌ 未知操作：{callback_data}"
+            reply_markup = self.create_main_menu()
+
+        await query.edit_message_text(text=text, reply_markup=reply_markup)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理普通消息"""
