@@ -4,10 +4,12 @@
 简化机器人启动过程，支持从配置文件加载设置
 """
 
-import os
 import json
+import os
 import sys
+
 from stock_bot import StockBot
+
 
 def load_config():
     """加载配置文件"""
@@ -26,6 +28,7 @@ def load_config():
         print(f"❌ 读取配置文件失败: {e}")
         sys.exit(1)
 
+
 def validate_config(config):
     """验证配置"""
     if not config.get("telegram_token") or config["telegram_token"] == "YOUR_TELEGRAM_BOT_TOKEN":
@@ -37,6 +40,7 @@ def validate_config(config):
         sys.exit(1)
 
     return True
+
 
 def main():
     """主函数"""
@@ -70,6 +74,7 @@ def main():
     except Exception as e:
         print(f"❌ 机器人运行出错: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

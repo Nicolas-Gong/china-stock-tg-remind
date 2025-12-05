@@ -10,14 +10,13 @@ Telegram股票价格提醒机器人
    - 设置提醒频率
 4. 使用文件缓存存储数据
 """
-
-import os
+import asyncio
 import json
-import time
-import threading
-import requests
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+
+import requests
 import telegram
 from telegram import Update
 from telegram.ext import (
@@ -40,6 +39,7 @@ DEFAULT_CONFIG = {
     "cache_expiry_seconds": 6,  # 缓存过期时间（秒）
 }
 
+
 # 从配置文件加载配置
 def load_config():
     """从config.json加载配置"""
@@ -60,8 +60,10 @@ def load_config():
         print("未找到config.json文件，使用默认配置...")
         return DEFAULT_CONFIG
 
+
 # 全局配置
 CONFIG = load_config()
+
 
 def is_trading_time(stock_code: str) -> bool:
     """
@@ -85,7 +87,7 @@ def is_trading_time(stock_code: str) -> bool:
         afternoon_end = datetime.strptime("15:00", "%H:%M").time()
 
         return (morning_start <= current_time <= morning_end) or \
-               (afternoon_start <= current_time <= afternoon_end)
+            (afternoon_start <= current_time <= afternoon_end)
 
     elif stock_code.isdigit() and len(stock_code) == 5:
         # 港股：北京时间 9:30-12:00, 13:00-16:00
@@ -95,7 +97,7 @@ def is_trading_time(stock_code: str) -> bool:
         afternoon_end = datetime.strptime("16:00", "%H:%M").time()
 
         return (morning_start <= current_time <= morning_end) or \
-               (afternoon_start <= current_time <= afternoon_end)
+            (afternoon_start <= current_time <= afternoon_end)
 
     elif stock_code.replace('.', '').isalpha():
         # 美股：美东时间 9:30-16:00，转换为北京时间
@@ -108,7 +110,7 @@ def is_trading_time(stock_code: str) -> bool:
 
         # 如果是晚上21:30到23:59，或是凌晨00:00到04:00
         if (current_time >= us_start_evening and current_time <= us_end_night) or \
-           (current_time >= us_start_next_morning and current_time <= us_end_next_morning):
+                (current_time >= us_start_next_morning and current_time <= us_end_next_morning):
             return True
 
         return False
@@ -116,6 +118,7 @@ def is_trading_time(stock_code: str) -> bool:
     else:
         # 未知市场，默认认为在交易时间内
         return True
+
 
 # 股票名称缓存
 class StockNameCache:
@@ -150,6 +153,7 @@ class StockNameCache:
         if stock_code and name:
             self.name_cache[stock_code] = name
             self._save_cache()
+
 
 # 股票数据缓存
 class StockCache:
@@ -192,6 +196,7 @@ class StockCache:
             'timestamp': datetime.now().isoformat()
         }
         self._save_cache()
+
 
 # 股票数据获取
 class StockDataFetcher:
@@ -285,8 +290,8 @@ class StockDataFetcher:
                 "code": fields[2],  # 股票代码
                 "name": fields[1],  # 股票名称
                 "current_price": float(fields[3]),  # 当前价格
-                "prev_close": float(fields[4]),     # 昨收
-                "open_price": float(fields[5]),     # 今开
+                "prev_close": float(fields[4]),  # 昨收
+                "open_price": float(fields[5]),  # 今开
                 "volume": int(fields[6]) if fields[6] else 0,  # 成交量
                 "timestamp": datetime.now().isoformat()
             }
@@ -295,7 +300,7 @@ class StockDataFetcher:
             if len(fields) > 33:
                 stock_data["high_price"] = float(fields[33]) if fields[33] else 0  # 最高价
             if len(fields) > 34:
-                stock_data["low_price"] = float(fields[34]) if fields[34] else 0   # 最低价
+                stock_data["low_price"] = float(fields[34]) if fields[34] else 0  # 最低价
 
             # 计算涨跌幅
             if stock_data["prev_close"] > 0:
@@ -317,6 +322,7 @@ class StockDataFetcher:
             print(f"解析股票数据时出错: {e}")
             print(f"原始数据: {raw_data[:200]}...")  # 只打印前200字符用于调试
             return None
+
 
 # 提醒管理
 class AlertManager:
@@ -359,11 +365,11 @@ class AlertManager:
         # 检查是否已存在完全相同的提醒
         for existing in self.alerts["alerts"]:
             if (existing["user_id"] == user_id and
-                existing["stock_code"] == stock_code and
-                existing["alert_type"] == alert_type and
-                existing["threshold"] == threshold and
-                existing.get("threshold_direction", "both") == threshold_direction and
-                existing["interval_minutes"] == interval_minutes):
+                    existing["stock_code"] == stock_code and
+                    existing["alert_type"] == alert_type and
+                    existing["threshold"] == threshold and
+                    existing.get("threshold_direction", "both") == threshold_direction and
+                    existing["interval_minutes"] == interval_minutes):
                 return False  # 已存在
 
         self.alerts["alerts"].append(alert)
@@ -420,6 +426,7 @@ class AlertManager:
         # 此方法已废弃，保留用于向后兼容
         print("警告：check_alerts_sync方法已废弃，请使用异步的check_alerts_async方法")
         return []
+
 
 # 机器人命令处理
 class StockBot:
@@ -603,7 +610,7 @@ class StockBot:
             threshold_display = f"{direction_symbols[threshold_direction]}{alert['threshold']}"
 
             message += (
-                f"{i+1}. 股票: {stock_display}\n"
+                f"{i + 1}. 股票: {stock_display}\n"
                 f"   类型: {alert['alert_type']}\n"
                 f"   阈值: {threshold_display}%\n"
                 f"   时间间隔: {alert['interval_minutes']}分钟\n"
@@ -687,7 +694,8 @@ class StockBot:
                     print(f"[{current_time}] 获取 {stock_code} 数据失败")
                     continue
 
-                print(f"[{current_time}] {stock_code} 价格: {stock_data.get('current_price', 0)}, 涨跌幅: {stock_data.get('change_percent', 0)}%")
+                print(
+                    f"[{current_time}] {stock_code} 价格: {stock_data.get('current_price', 0)}, 涨跌幅: {stock_data.get('change_percent', 0)}%")
 
                 # 检查提醒条件
                 alert_triggered = False
@@ -717,10 +725,10 @@ class StockBot:
                         }[threshold_direction]
 
                         message = (f"🔔 股票提醒\n"
-                                  f"股票: {stock_data['name']} ({stock_data['code']})\n"
-                                  f"当前价格: {stock_data['current_price']}\n"
-                                  f"{direction_desc}: {abs(change_percent)}%\n"
-                                  f"阈值: {alert['threshold']}%")
+                                   f"股票: {stock_data['name']} ({stock_data['code']})\n"
+                                   f"当前价格: {stock_data['current_price']}\n"
+                                   f"{direction_desc}: {abs(change_percent)}%\n"
+                                   f"阈值: {alert['threshold']}%")
 
                 elif alert["alert_type"] == "今日涨跌":
                     # 今日涨跌幅提醒
@@ -728,19 +736,23 @@ class StockBot:
                     threshold_direction = alert.get("threshold_direction", "both")
 
                     print(f"DEBUG_DAILY_CHANGE: {stock_code} 进入今日涨跌检查")
-                    print(f"[{current_time}] {stock_code} 检查今日涨跌提醒: 涨跌幅={change_percent}%, 阈值方向={threshold_direction}, 阈值={alert['threshold']}%")
+                    print(
+                        f"[{current_time}] {stock_code} 检查今日涨跌提醒: 涨跌幅={change_percent}%, 阈值方向={threshold_direction}, 阈值={alert['threshold']}%")
 
                     # 根据方向判断是否触发提醒
                     should_trigger = False
                     if threshold_direction == "both":
                         should_trigger = abs(change_percent) >= alert["threshold"]
-                        print(f"[{current_time}] {stock_code} 双向检查: abs({change_percent}) >= {alert['threshold']} = {should_trigger}")
+                        print(
+                            f"[{current_time}] {stock_code} 双向检查: abs({change_percent}) >= {alert['threshold']} = {should_trigger}")
                     elif threshold_direction == "up":
                         should_trigger = change_percent >= alert["threshold"]
-                        print(f"[{current_time}] {stock_code} 上涨检查: {change_percent} >= {alert['threshold']} = {should_trigger}")
+                        print(
+                            f"[{current_time}] {stock_code} 上涨检查: {change_percent} >= {alert['threshold']} = {should_trigger}")
                     elif threshold_direction == "down":
                         should_trigger = change_percent <= -alert["threshold"]
-                        print(f"[{current_time}] {stock_code} 下跌检查: {change_percent} <= -{alert['threshold']} = {should_trigger}")
+                        print(
+                            f"[{current_time}] {stock_code} 下跌检查: {change_percent} <= -{alert['threshold']} = {should_trigger}")
 
                     if should_trigger:
                         alert_triggered = True
@@ -753,9 +765,9 @@ class StockBot:
                         }[threshold_direction]
 
                         message = (f"🔔 今日涨跌幅提醒\n"
-                                  f"股票: {stock_data['name']} ({stock_data['code']})\n"
-                                  f"{direction_desc}: {abs(change_percent)}%\n"
-                                  f"阈值: {alert['threshold']}%")
+                                   f"股票: {stock_data['name']} ({stock_data['code']})\n"
+                                   f"{direction_desc}: {abs(change_percent)}%\n"
+                                   f"阈值: {alert['threshold']}%")
                     else:
                         print(f"[{current_time}] {stock_code} 未满足提醒条件")
 
@@ -799,6 +811,7 @@ class StockBot:
             first=10  # 10秒后开始第一次检查
         )
 
+
 async def main():
     """主函数"""
     # 创建机器人实例
@@ -809,6 +822,7 @@ async def main():
 
     # 启动机器人
     await bot.app.run_polling()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
