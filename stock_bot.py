@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 
 import requests
 import telegram
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -608,6 +608,9 @@ class StockBot:
         # 创建应用
         self.app = Application.builder().token(token).build()
 
+        # 设置Bot Commands
+        self.setup_bot_commands()
+
         # 注册命令处理器
         self.app.add_handler(CommandHandler("start", self.start))
         self.app.add_handler(CommandHandler("help", self.help))
@@ -618,6 +621,22 @@ class StockBot:
 
         # 注册消息处理器
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+
+    async def setup_bot_commands(self):
+        """设置机器人命令列表（在输入/时显示）"""
+        commands = [
+            telegram.BotCommand("start", "开始使用机器人"),
+            telegram.BotCommand("help", "查看帮助信息"),
+            telegram.BotCommand("add", "添加股票提醒"),
+            telegram.BotCommand("list", "查看我的提醒列表"),
+            telegram.BotCommand("remove", "删除股票提醒"),
+        ]
+
+        try:
+            await self.bot.set_my_commands(commands)
+            logger.info("Bot commands设置成功")
+        except Exception as e:
+            logger.error(f"设置Bot commands失败: {e}")
 
     def create_main_menu(self) -> InlineKeyboardMarkup:
         """创建主菜单键盘"""
@@ -636,6 +655,20 @@ class StockBot:
         ]
         return InlineKeyboardMarkup(keyboard)
 
+    def create_persistent_menu(self) -> ReplyKeyboardMarkup:
+        """创建常驻菜单键盘"""
+        keyboard = [
+            [
+                KeyboardButton("📋 查看提醒"),
+                KeyboardButton("➕ 添加提醒"),
+            ],
+            [
+                KeyboardButton("🗑️ 删除提醒"),
+                KeyboardButton("❓ 帮助"),
+            ]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /start 命令"""
         user = update.effective_user
@@ -645,8 +678,16 @@ class StockBot:
             "📱 请选择以下功能："
         )
 
+        # 发送欢迎消息和主菜单
         reply_markup = self.create_main_menu()
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+
+        # 设置常驻菜单
+        persistent_menu = self.create_persistent_menu()
+        await update.message.reply_text(
+            "💡 现在您可以使用下方的常驻菜单快速操作：",
+            reply_markup=persistent_menu
+        )
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /help 命令"""
@@ -902,11 +943,19 @@ class StockBot:
                     }
                     threshold_display = f"{direction_symbols[threshold_direction]}{alert['threshold']}"
 
+                    # 格式化创建时间
+                    try:
+                        created_datetime = datetime.fromisoformat(alert['created_at'])
+                        created_time_str = created_datetime.strftime("%Y-%m-%d %H:%M:%S")
+                    except (ValueError, TypeError):
+                        created_time_str = alert.get('created_at', '未知')
+
                     text += (
                         f"{i + 1}. 📈 {stock_display}\n"
                         f"   类型: {alert['alert_type']}\n"
                         f"   阈值: {threshold_display}%\n"
-                        f"   间隔: {alert['interval_minutes']}分钟\n\n"
+                        f"   间隔: {alert['interval_minutes']}分钟\n"
+                        f"   创建时间: {created_time_str}\n\n"
                     )
 
                 text += "💡 使用「🗑️ 删除提醒」功能可以移除不需要的提醒。"
@@ -997,7 +1046,50 @@ class StockBot:
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理普通消息"""
         text = update.message.text
-        await update.message.reply_text(f"你发送了：{text}")
+
+        # 处理常驻菜单按钮点击
+        if text == "📋 查看提醒":
+            await self.list_alerts(update, context)
+        elif text == "➕ 添加提醒":
+            # 显示添加提醒说明
+            text = (
+                "➕ 添加股票提醒\n\n"
+                "请使用以下命令格式添加提醒：\n\n"
+                "📝 基础格式：\n"
+                "`/add 股票代码 提醒类型 阈值 时间间隔`\n\n"
+                "📊 示例：\n"
+                "`/add 600000 价格变化 2 5`\n"
+                "`/add 000001 今日涨跌 5`\n\n"
+                "🎯 参数说明：\n"
+                "• 股票代码：如 600000、000001\n"
+                "• 提醒类型：价格变化 / 今日涨跌\n"
+                "• 阈值：百分比（如 2 表示 2%）\n"
+                "• 时间间隔：分钟（可选，默认5分钟）\n\n"
+                "💡 阈值格式：\n"
+                "±2 或 2 = 双向提醒\n"
+                "+2 = 只涨提醒\n"
+                "-2 = 只跌提醒"
+            )
+            await update.message.reply_text(text)
+        elif text == "🗑️ 删除提醒":
+            # 显示删除提醒说明
+            text = (
+                "🗑️ 删除股票提醒\n\n"
+                "请使用以下命令删除提醒：\n\n"
+                "📝 命令格式：\n"
+                "`/remove 提醒编号`\n\n"
+                "📊 示例：\n"
+                "`/remove 1` - 删除第一个提醒\n"
+                "`/remove 2` - 删除第二个提醒\n\n"
+                "💡 查看提醒列表：\n"
+                "先使用「📋 查看提醒」功能查看提醒编号，然后再删除。"
+            )
+            await update.message.reply_text(text)
+        elif text == "❓ 帮助":
+            await self.help(update, context)
+        else:
+            # 处理其他普通消息
+            await update.message.reply_text(f"你发送了：{text}\n\n💡 使用下方的菜单按钮来操作机器人功能。")
 
     def start_polling(self):
         """启动机器人"""
