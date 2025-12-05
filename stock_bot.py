@@ -427,7 +427,7 @@ class AlertManager:
             alert_triggered = False
             message = ""
 
-            if alert["alert_type"] == "price_change":
+            if alert["alert_type"] == "价格变化":
                 # 价格变化提醒
                 change_percent = stock_data.get("change_percent", 0)
                 threshold_direction = alert.get("threshold_direction", "both")
@@ -456,7 +456,7 @@ class AlertManager:
                               f"{direction_desc}: {abs(change_percent)}%\n"
                               f"阈值: {alert['threshold']}%")
 
-            elif alert["alert_type"] == "daily_change":
+            elif alert["alert_type"] == "今日涨跌":
                 # 今日涨跌幅提醒
                 change_percent = stock_data.get("change_percent", 0)
                 threshold_direction = alert.get("threshold_direction", "both")
