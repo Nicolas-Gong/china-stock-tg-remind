@@ -687,7 +687,14 @@ class StockBot:
     def start_polling(self):
         """启动机器人"""
         print("启动股票提醒机器人...")
-        self.app.run_polling()
+        try:
+            self.app.run_polling()
+        except Exception as e:
+            print(f"机器人启动失败: {e}")
+            if "Conflict" in str(e):
+                print("检测到冲突：可能是另一个机器人实例正在运行")
+                print("请先停止其他机器人实例，然后重新启动")
+            raise
 
     def start_checking_alerts(self):
         """启动定期检查提醒"""
