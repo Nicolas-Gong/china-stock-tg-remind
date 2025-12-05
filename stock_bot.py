@@ -1092,12 +1092,8 @@ class StockBot:
         """启动机器人"""
         logger.info("启动股票提醒机器人...")
 
-        async def post_init(application):
-            """应用初始化后的回调"""
-            await self.setup_bot_commands()
-
         try:
-            self.app.run_polling(post_init=post_init)
+            self.app.run_polling()
         except Exception as e:
             logger.error(f"机器人启动失败: {e}")
             if "Conflict" in str(e):
