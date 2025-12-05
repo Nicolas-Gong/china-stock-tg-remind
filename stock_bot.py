@@ -500,11 +500,19 @@ class AlertManager:
                 if can_send:
                     try:
                         print(f"[{current_time}] {stock_code} 发送提醒消息: {message[:50]}...")
-                        bot.send_message(
-                            chat_id=alert["user_id"],
-                            text=message,
-                            parse_mode=telegram.constants.ParseMode.HTML
+                        # 注意：这里需要使用异步方式，但当前是同步函数
+                        # 暂时使用同步方式，后续可以优化为异步
+                        import asyncio
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(
+                            bot.send_message(
+                                chat_id=alert["user_id"],
+                                text=message,
+                                parse_mode=telegram.constants.ParseMode.HTML
+                            )
                         )
+                        loop.close()
                         print(f"[{current_time}] {stock_code} 提醒消息发送成功")
                     except Exception as e:
                         print(f"[{current_time}] {stock_code} 发送提醒失败: {e}")
