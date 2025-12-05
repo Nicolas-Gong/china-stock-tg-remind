@@ -608,9 +608,6 @@ class StockBot:
         # 创建应用
         self.app = Application.builder().token(token).build()
 
-        # 设置Bot Commands
-        self.setup_bot_commands()
-
         # 注册命令处理器
         self.app.add_handler(CommandHandler("start", self.start))
         self.app.add_handler(CommandHandler("help", self.help))
@@ -1094,8 +1091,13 @@ class StockBot:
     def start_polling(self):
         """启动机器人"""
         logger.info("启动股票提醒机器人...")
+
+        async def post_init(application):
+            """应用初始化后的回调"""
+            await self.setup_bot_commands()
+
         try:
-            self.app.run_polling()
+            self.app.run_polling(post_init=post_init)
         except Exception as e:
             logger.error(f"机器人启动失败: {e}")
             if "Conflict" in str(e):
